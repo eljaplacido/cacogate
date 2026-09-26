@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cacogate.local/contracts/v0/ledger-entry.schema.json",
+  "title": "LedgerEntry — one line of a per-session hash chain",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["seq", "session_id", "kind", "body_digest", "prev_hash", "hash", "recorded_at"],
+  "properties": {
+    "seq": { "type": "integer", "minimum": 0 },
+    "session_id": { "type": "string", "minLength": 1 },
+    "kind": { "enum": ["envelope", "decision", "human", "execution", "outcome", "degradation", "checkpoint"] },
+    "body_digest": { "$ref": "verdict.schema.json#/$defs/Digest" },
+    "body": {},
+    "prev_hash": { "$ref": "verdict.schema.json#/$defs/Digest" },
+    "hash": { "$ref": "verdict.schema.json#/$defs/Digest", "description": "sha256(JCS(entry with hash set to the empty string))" },
+    "recorded_at": { "type": "string", "format": "date-time" }
+  }
+}

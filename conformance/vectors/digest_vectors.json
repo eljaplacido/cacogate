@@ -1,0 +1,80 @@
+{
+  "_comment": "Canonical text is hand-written per RFC 8785; digest = sha256 of its UTF-8 bytes (hashlib). Every language's JCS must reproduce both.",
+  "vectors": [
+    {
+      "name": "empty_object",
+      "input": {},
+      "canonical": "{}",
+      "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "name": "key_order",
+      "input": {
+        "b": 1,
+        "a": 2
+      },
+      "canonical": "{\"a\":2,\"b\":1}",
+      "digest": "sha256:d3626ac30a87e6f7a6428233b3c68299976865fa5508e4267c5415c76af7a772"
+    },
+    {
+      "name": "nested",
+      "input": {
+        "z": {
+          "y": [
+            1,
+            "two",
+            null,
+            true
+          ]
+        },
+        "a": false
+      },
+      "canonical": "{\"a\":false,\"z\":{\"y\":[1,\"two\",null,true]}}",
+      "digest": "sha256:d934106b41249b5c27c28ec314952f1d8194040aceb70f785d606b3361a75c78"
+    },
+    {
+      "name": "numbers",
+      "input": [
+        1.0,
+        0.05,
+        1e+21,
+        1e-07,
+        100,
+        -3
+      ],
+      "canonical": "[1,0.05,1e+21,1e-7,100,-3]",
+      "digest": "sha256:2c99ad889a460eb07dc2c4f49745537b99244c7d6cf2e198a8a003276edd73a2"
+    },
+    {
+      "name": "escapes",
+      "input": {
+        "s": "tab\tnl\nq\"bs\\ctl\u001f"
+      },
+      "canonical": "{\"s\":\"tab\\tnl\\nq\\\"bs\\\\ctl\\u001f\"}",
+      "digest": "sha256:fdf9e2332f829874f7c6f9e0c6587da07f08376bc4a933b773c7cae73c2548c9"
+    },
+    {
+      "name": "unicode",
+      "input": {
+        "é": "€",
+        "a": "ö"
+      },
+      "canonical": "{\"a\":\"ö\",\"é\":\"€\"}",
+      "digest": "sha256:e277bb30d6e60f32091070b5410801eee49738bf271e4d62f8223c6cebbbeb6d"
+    },
+    {
+      "name": "action_identity",
+      "input": {
+        "tool": "Bash",
+        "args": {
+          "command": "git push origin main",
+          "description": "push"
+        },
+        "cwd": "/repo",
+        "root": "/repo"
+      },
+      "canonical": "{\"args\":{\"command\":\"git push origin main\",\"description\":\"push\"},\"cwd\":\"/repo\",\"root\":\"/repo\",\"tool\":\"Bash\"}",
+      "digest": "sha256:21a8516feea3d67af5b19fdfa9277c14423b6d993a6e4227310b5d37599ff011"
+    }
+  ]
+}

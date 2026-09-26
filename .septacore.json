@@ -1,0 +1,52 @@
+{
+  "steps": [
+    {
+      "name": "rust format",
+      "argv": ["cargo", "fmt", "--all", "--check"],
+      "cwd": ".",
+      "kind": "blocking",
+      "requires": ["Cargo.toml"],
+      "timeout": 120
+    },
+    {
+      "name": "rust lint (clippy -D warnings)",
+      "argv": ["cargo", "clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"],
+      "cwd": ".",
+      "kind": "blocking",
+      "requires": ["Cargo.toml", "Cargo.lock"],
+      "timeout": 900
+    },
+    {
+      "name": "rust tests (unit, conformance, specs traceability, cli)",
+      "argv": ["cargo", "test", "--workspace", "--locked"],
+      "cwd": ".",
+      "kind": "blocking",
+      "requires": ["Cargo.toml", "Cargo.lock", "conformance/verdicts.golden.json", "contracts/v0"],
+      "timeout": 900
+    },
+    {
+      "name": "adapters typecheck",
+      "argv": ["pnpm", "--dir", "adapters", "typecheck"],
+      "cwd": ".",
+      "kind": "blocking",
+      "requires": ["adapters/package.json", "adapters/node_modules"],
+      "timeout": 300
+    },
+    {
+      "name": "adapters lint (biome)",
+      "argv": ["pnpm", "--dir", "adapters", "lint"],
+      "cwd": ".",
+      "kind": "blocking",
+      "requires": ["adapters/package.json", "adapters/node_modules"],
+      "timeout": 300
+    },
+    {
+      "name": "adapters tests (vitest, shared vectors)",
+      "argv": ["pnpm", "--dir", "adapters", "test"],
+      "cwd": ".",
+      "kind": "blocking",
+      "requires": ["adapters/package.json", "adapters/node_modules", "conformance/vectors/digest_vectors.json"],
+      "timeout": 300
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cacogate.local/contracts/v0/execution-record.schema.json",
+  "title": "ExecutionRecord — what happened after a decision (joins on session_id + tool_use_id)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "session_id", "tool_use_id", "executed", "bucket", "ts"],
+  "properties": {
+    "contract_version": { "const": "0.1.0" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "tool_use_id": { "type": "string", "minLength": 1 },
+    "decision_id": { "type": "string" },
+    "executed": { "type": "boolean" },
+    "mode": { "enum": ["direct", "sandbox", "canary"] },
+    "exit_code": { "type": "integer" },
+    "is_error": { "type": "boolean" },
+    "bucket": { "enum": ["result", "refusal", "apparatus_failure"] },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "ts": { "type": "string", "format": "date-time" }
+  }
+}

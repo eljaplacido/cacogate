@@ -1,0 +1,10 @@
+{
+  "_comment": "Combination = most restrictive `allows`. Each vector: checks' allows -> expected verdict.",
+  "vectors": [
+    { "allows": ["allow"], "expect": "allow" },
+    { "allows": ["allow", "sandbox"], "expect": "sandbox" },
+    { "allows": ["sandbox", "request_evidence", "allow"], "expect": "request_evidence" },
+    { "allows": ["ask_human", "block"], "expect": "block" },
+    { "allows": ["canary", "revise"], "expect": "revise" }
+  ]
+}

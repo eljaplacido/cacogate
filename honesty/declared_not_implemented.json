@@ -1,0 +1,158 @@
+{
+  "_comment": "Every feature documented in docs/ but not yet built. Entries leave only by closing with a commit + test reference. pending_close = built and tested, awaiting the commit that closes it.",
+  "open": [
+    {
+      "id": "kernel-conformal",
+      "claim": "Conformal apply in the kernel (every decision reports conformal status `absent`)",
+      "doc": "docs/01-BLUEPRINT.md#3.3"
+    },
+    {
+      "id": "kernel-temporal",
+      "claim": "Temporal monitor beyond edit-then-push session state",
+      "doc": "docs/01-BLUEPRINT.md#3.1"
+    },
+    {
+      "id": "daemon-unix-socket",
+      "claim": "Daemon unix socket (only loopback HTTP exists)",
+      "doc": "docs/01-BLUEPRINT.md#1.2"
+    },
+    {
+      "id": "ledger-checkpoints",
+      "claim": "Ledger checkpoints (external heads) and exporters (TrustLayer, OTel, PROV)",
+      "doc": "docs/01-BLUEPRINT.md#1.2"
+    },
+    {
+      "id": "adapters-gnomon-native",
+      "claim": "gnomon native [gate] integration (degraded `cacogate run` path exists)",
+      "doc": "docs/01-BLUEPRINT.md#5"
+    },
+    {
+      "id": "adapters-codex-gemini-openfang",
+      "claim": "Adapters for codex, gemini, openfang",
+      "doc": "docs/01-BLUEPRINT.md#5"
+    },
+    {
+      "id": "adapters-replay-fixtures",
+      "claim": "Per-harness replay fixtures under conformance/harness/",
+      "doc": "docs/01-BLUEPRINT.md#5"
+    },
+    {
+      "id": "conformal",
+      "claim": "CRC calibration + ACI + shift martingale (lab)",
+      "doc": "docs/01-BLUEPRINT.md#3.3"
+    },
+    {
+      "id": "rig",
+      "claim": "Repository Impact Graph",
+      "doc": "docs/01-BLUEPRINT.md#3.2"
+    },
+    {
+      "id": "sandbox",
+      "claim": "bwrap/docker/nemoclaw backends with self-tests; sandbox/canary verdicts currently ask a person",
+      "doc": "docs/01-BLUEPRINT.md#1.2"
+    },
+    {
+      "id": "capability",
+      "claim": "Single-use HMAC capability bound to action digest",
+      "doc": "docs/01-BLUEPRINT.md#3.6"
+    },
+    {
+      "id": "ux-tui-web",
+      "claim": "ratatui TUI and web app (line-mode watch/explain/status exist)",
+      "doc": "docs/01-BLUEPRINT.md#10"
+    },
+    {
+      "id": "jev",
+      "claim": "Jev / local-S1 feature providers",
+      "doc": "docs/01-BLUEPRINT.md#3.5"
+    },
+    {
+      "id": "benchmarks",
+      "claim": "B0-B8 preregistered benchmarks",
+      "doc": "docs/01-BLUEPRINT.md#12"
+    },
+    {
+      "id": "lab",
+      "claim": "Python lab (cacogate_lab) and its ruff/mypy/pytest gate steps",
+      "doc": "docs/01-BLUEPRINT.md#7.3"
+    },
+    {
+      "id": "skills",
+      "claim": "Agent skills with ATTESTATION.json",
+      "doc": "docs/01-BLUEPRINT.md#9"
+    },
+    {
+      "id": "adapters-skills-in-plugin",
+      "claim": "Agent skills (§9) bundled in the Claude Code plugin",
+      "doc": "docs/01-BLUEPRINT.md#9"
+    }
+  ],
+  "pending_close": [
+    {
+      "id": "kernel",
+      "claim": "Pure kernel: shell parser, facts, policy, symbolic checks, ladder, packets",
+      "tests": [
+        "SH-*",
+        "FA-*",
+        "PO-*",
+        "DE-*",
+        "GT-*"
+      ]
+    },
+    {
+      "id": "daemon",
+      "claim": "Daemon on 127.0.0.1:4320 (loopback HTTP)",
+      "tests": [
+        "EN-*"
+      ]
+    },
+    {
+      "id": "ledger",
+      "claim": "Hash-chained per-session ledger with redaction and sqlite index",
+      "tests": [
+        "LD-*",
+        "RD-*"
+      ]
+    },
+    {
+      "id": "adapters-claude-code",
+      "claim": "Claude Code command hook with local fail-closed fallback",
+      "tests": [
+        "CC-*",
+        "AD-001",
+        "AD-002"
+      ]
+    },
+    {
+      "id": "adapters-opencode-pi-omp",
+      "claim": "OpenCode plugin and pi/omp extension",
+      "tests": [
+        "adapters/test/*.test.ts"
+      ]
+    },
+    {
+      "id": "adapters-gnomon-degraded",
+      "claim": "`cacogate run` wrapper for harnesses without hooks (gnomon degraded path)",
+      "tests": [
+        "AD-010..AD-015"
+      ]
+    },
+    {
+      "id": "contracts-doc",
+      "claim": "docs/CONTRACTS.md tables checked against schemas and goldens",
+      "tests": [
+        "CF-009",
+        "CF-010"
+      ]
+    },
+    {
+      "id": "adapters-claude-code-plugin",
+      "claim": "adapters/claude-code/ plugin: hooks.json, fail-closed launcher, /cacogate:status and /cacogate:explain",
+      "tests": [
+        "AD-016",
+        "PO-008"
+      ]
+    }
+  ],
+  "closed": []
+}

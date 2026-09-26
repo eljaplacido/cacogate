@@ -1,0 +1,32 @@
+[package]
+name = "cacogate-cli"
+description = "The `cacogate` command: daemon, hooks, check, watch, explain, status, doctor."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "cacogate"
+path = "src/main.rs"
+
+[dependencies]
+time.workspace = true
+cacogate-contracts.workspace = true
+cacogate-kernel.workspace = true
+cacogate-harness.workspace = true
+cacogate-ledger.workspace = true
+cacogate-daemon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+clap.workspace = true
+ureq.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

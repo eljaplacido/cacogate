@@ -1,0 +1,20 @@
+{
+  "_comment": "Three-point rule: this file == contracts/v0/verdict.schema.json enums == docs/CONTRACTS.md tables == code unions.",
+  "verdict_ladder": ["allow", "sandbox", "canary", "revise", "request_evidence", "ask_human", "block"],
+  "executes": { "allow": true, "sandbox": true, "canary": true, "revise": false, "request_evidence": false, "ask_human": false, "block": false },
+  "check_status": ["passed", "failed", "not_applicable", "could_not_measure"],
+  "rule_class_max": { "invariant": "block", "defeasible": "ask_human", "advisory": "revise" },
+  "fail_class": {
+    "read": "allow",
+    "local_edit": "ask_human",
+    "shell_local": "ask_human",
+    "vcs_local": "ask_human",
+    "vcs_remote": "block",
+    "network": "block",
+    "deploy": "block",
+    "mcp": "ask_human",
+    "delegate": "ask_human"
+  },
+  "unmeasured_default": { "read": "allow", "mutating": "ask_human" },
+  "expected_count": { "verdict_ladder": 7, "check_status": 4, "fail_class": 9 }
+}

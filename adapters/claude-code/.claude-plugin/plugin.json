@@ -1,0 +1,8 @@
+{
+  "name": "cacogate",
+  "version": "0.0.1",
+  "description": "Causal–conformal action gate: every tool call is checked by the local cacogate daemon before it runs. Deny-first; it only tightens Claude Code's own permissions.",
+  "author": { "name": "Elja Placido" },
+  "license": "UNLICENSED",
+  "keywords": ["safety", "gate", "hooks", "policy"]
+}
