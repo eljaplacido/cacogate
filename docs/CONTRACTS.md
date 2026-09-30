@@ -191,10 +191,20 @@ gnomon's three-bucket outcome discipline.
 
 ## Daemon HTTP API (loopback only)
 
+**Identity.** Every reply carries `x-cacogate-daemon: <nonce>`. After binding,
+the daemon writes `<data_dir>/daemon.json` (mode 0600):
+`{pid, addr, nonce, policy_digest, started}`. Adapters use a decision only if
+the header equals the file's nonce, the decision's `policy_digest` equals the
+file's, and the decision's `envelope_digest` is the JCS digest of the envelope
+they sent. Otherwise they discard the reply, spool `daemon_identity_mismatch` or
+`daemon_reply_unbound`, and decide locally (fail-closed). Adapters and daemon
+must therefore share `CACOGATE_DATA_DIR`; `cacogate doctor` checks it.
+
+
 | Method | Path | Body → reply |
 |---|---|---|
 | GET | `/v1/health` | → `{ok, version, mode, policy, policy_digest, ledger_dir, uptime_s}` |
-| GET | `/v1/status` | → counters and latency |
+| GET | `/v1/status` | → counters and latency, plus `by_rule` (`{fired, held}` per rule), `by_mode` (`{total, would_hold}` per mode) and `gate_reads` |
 | POST | `/v1/check` | `ActionEnvelope` → `{decision: GateDecision, packet}` |
 | POST | `/v1/execution` | `ExecutionRecord` → ack |
 | GET | `/v1/decisions` | → recent index rows |
@@ -206,6 +216,7 @@ gnomon's three-bucket outcome discipline.
 | Command | Codes |
 |---|---|
 | `cacogate hook claude-code` | 0 always, with a JSON decision on stdout; 2 blocks when structured output cannot be delivered or, in enforce mode, when the payload is unreadable |
-| `cacogate run -- …` | the child's code (128+n on signal n); 126 refused or needs a person; 127 not startable; 2 usage |
+| `cacogate run -- …` | the child's code (128+n on signal n); 126 refused or needs a person; 127 not startable; 2 usage. `CACOGATE_HARNESS_VERSION` and `CACOGATE_MODEL` are recorded on the envelope when set. |
 | `cacogate check` | 0 would execute; 1 would not |
+| `cacogate corpus <file>` | 0 report printed; 2 file or policy unreadable |
 | `cacogate ledger verify` | 0 intact; 1 a chain is broken; 2 ledger unreadable |

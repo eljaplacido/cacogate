@@ -250,6 +250,10 @@ impl Policy {
                 "**/secrets/**".into(),
                 "**/credentials*.json".into(),
                 "**/service-account*.json".into(),
+                // The daemon's identity nonce: reading it is the first step
+                // of impersonating the gate (see cacogate-daemon identity).
+                "**/.local/share/cacogate/daemon.json".into(),
+                "**/.config/cacogate/keys/**".into(),
             ],
             secret_exceptions: vec![
                 "**/.env.example".into(),
@@ -328,6 +332,18 @@ pub struct Firing {
 }
 
 impl CompiledPolicy {
+    /// Paths the action reads that belong to the gate itself (adapters, hook
+    /// configuration, cacogate config and ledger). Reading them is allowed; it
+    /// is recorded so we can measure how often an agent studies the gate,
+    /// typically right after a refusal.
+    pub fn gate_reads(&self, f: &ActionFacts) -> Vec<String> {
+        f.paths_read
+            .iter()
+            .filter(|p| self.self_protect.is_match(p.as_str()))
+            .cloned()
+            .collect()
+    }
+
     /// Evaluate every rule; return the ones that fire.
     pub fn evaluate(
         &self,
@@ -414,6 +430,7 @@ impl CompiledPolicy {
                             .iter()
                             .any(|r| is_within(p, r) && p.as_str() != r)
                     })
+                    .filter(|p| !f.strictly_in_linked_root(p))
                     .cloned()
                     .collect();
                 // Unresolved targets (`rm -rf "$DIR"`) are not guessed at here;
@@ -437,7 +454,7 @@ impl CompiledPolicy {
                 .paths_written
                 .iter()
                 .filter(|p| {
-                    !is_within(p, &f.root)
+                    !f.in_workspace(p)
                         && !self
                             .policy
                             .extra_write_roots
@@ -495,7 +512,7 @@ pub fn validate(policy: &Policy) -> Result<(), PolicyError> {
 mod tests {
     use super::*;
     use crate::facts::{
-        extract,
+        KernelEnv, extract,
         tests::{env_for, kenv},
     };
     use serde_json::json;
@@ -548,6 +565,31 @@ mod tests {
                 r.id
             );
         }
+    }
+
+    #[test]
+    fn test_po012_linked_roots_count_as_the_workspace() {
+        let p = Policy::builtin_strict().compile().unwrap();
+        let k = KernelEnv {
+            home: "/home/u".into(),
+            linked_roots: vec!["/work/repo-feat".into(), "/home/u".into(), "/".into()],
+        };
+        let run = |cmd: &str| -> Vec<String> {
+            let f = extract(&env_for("Bash", json!({"command": cmd})), &k);
+            p.evaluate(&f, &SessionState::default(), Some("feat/x"))
+                .into_iter()
+                .map(|x| x.rule.id)
+                .collect()
+        };
+        // Inside a linked worktree: an ordinary write and a scoped delete.
+        assert!(run("echo x > /work/repo-feat/a.txt").is_empty());
+        assert!(run("rm -rf /work/repo-feat/build").is_empty());
+        // Deleting the linked tree itself, or writing next to it, still fires.
+        assert!(run("rm -rf /work/repo-feat").contains(&"INV-FS-001".to_owned()));
+        assert!(run("echo x > /work/repo-other/a.txt").contains(&"DEF-FS-002".to_owned()));
+        // `/` and home are never accepted as linked roots.
+        assert!(run("echo x > /home/u/.bashrc").contains(&"DEF-FS-002".to_owned()));
+        assert!(run("echo x > /etc/hosts").contains(&"DEF-FS-002".to_owned()));
     }
 
     #[test]

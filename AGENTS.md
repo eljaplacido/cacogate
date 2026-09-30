@@ -38,5 +38,5 @@ Rust 1.94 (edition 2024) · Python 3.12 via uv · TypeScript 7 + pnpm 9 + biome 
 
 ## gx10 norms
 
-Never create a file named `brain.db`; ledger lives at `~/.local/share/cacogate/ledger.sqlite`.
+Never create a file named `brain.db`; the ledger lives under `~/.local/share/cacogate/` (JSONL chains and `index.jsonl`).
 Durable milestones go through `cb-gx10 log`. Prefer local Ollama for any model call in the lab.

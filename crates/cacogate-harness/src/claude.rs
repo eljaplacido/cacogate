@@ -173,6 +173,48 @@ pub fn hooks_config(binary: &str) -> Value {
     json!({ "hooks": { "PreToolUse": [pre], "PostToolUse": [post], "PostToolUseFailure": [fail] } })
 }
 
+/// Claude Code's version, from what it exports to hook processes:
+/// `AI_AGENT=claude-code_2-1-283_agent`, else the versioned install path in
+/// `CLAUDE_CODE_EXECPATH` (`…/claude/versions/2.1.283`). `"unknown"` otherwise.
+pub fn harness_version(ai_agent: Option<&str>, execpath: Option<&str>) -> String {
+    let from_agent = ai_agent.and_then(|a| {
+        let v = a.strip_prefix("claude-code_")?.split('_').next()?;
+        let v = v.replace('-', ".");
+        is_version(&v).then_some(v)
+    });
+    let from_path = || {
+        execpath.and_then(|p| {
+            let last = p.trim_end_matches('/').rsplit('/').next()?;
+            is_version(last).then(|| last.to_owned())
+        })
+    };
+    from_agent
+        .or_else(from_path)
+        .unwrap_or_else(|| "unknown".into())
+}
+
+fn is_version(v: &str) -> bool {
+    !v.is_empty()
+        && v.split('.').count() >= 2
+        && v.split('.')
+            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// The model of the latest assistant message in the tail of a Claude Code
+/// transcript (JSON lines). Lines cut off by the tail window are skipped.
+pub fn model_from_transcript_tail(tail: &str) -> Option<String> {
+    tail.lines().rev().find_map(|line| {
+        let v: Value = serde_json::from_str(line).ok()?;
+        if v.get("type").and_then(Value::as_str) != Some("assistant") {
+            return None;
+        }
+        v.pointer("/message/model")
+            .and_then(Value::as_str)
+            .filter(|m| !m.is_empty() && *m != "<synthetic>")
+            .map(str::to_owned)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,5 +272,37 @@ mod tests {
                 "{ev}"
             );
         }
+    }
+
+    #[test]
+    fn test_cc006_harness_version_from_hook_environment() {
+        assert_eq!(
+            harness_version(Some("claude-code_2-1-283_agent"), None),
+            "2.1.283"
+        );
+        assert_eq!(
+            harness_version(None, Some("/home/u/.local/share/claude/versions/2.1.283")),
+            "2.1.283"
+        );
+        assert_eq!(
+            harness_version(Some("something-else"), Some("/usr/bin/claude")),
+            "unknown"
+        );
+        assert_eq!(harness_version(None, None), "unknown");
+    }
+
+    #[test]
+    fn test_cc007_model_from_transcript_tail() {
+        let tail = concat!(
+            "e\":\"assistant\",\"message\":{\"model\":\"cut-off\"}}\n",
+            "{\"type\":\"assistant\",\"message\":{\"model\":\"claude-haiku-4-5-20251001\"}}\n",
+            "{\"type\":\"assistant\",\"message\":{\"model\":\"<synthetic>\"}}\n",
+            "{\"type\":\"user\",\"message\":{\"content\":\"hi\"}}\n"
+        );
+        assert_eq!(
+            model_from_transcript_tail(tail).as_deref(),
+            Some("claude-haiku-4-5-20251001")
+        );
+        assert_eq!(model_from_transcript_tail("{\"type\":\"user\"}"), None);
     }
 }

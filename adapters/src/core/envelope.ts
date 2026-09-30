@@ -15,11 +15,46 @@ export interface Repo {
   branch?: string;
 }
 
+/** Model identity recorded with each action (a decision driver). */
+export interface Model {
+  id?: string;
+  endpoint_kind?: string;
+}
+
+/**
+ * Version of the package that owns a CLI entry point: walk up from the entry
+ * script to the nearest package.json whose name contains `nameHint`.
+ */
+export function packageVersionNear(
+  entry: string | undefined,
+  nameHint: string,
+): string | undefined {
+  if (!entry) return undefined;
+  let dir = dirname(entry);
+  for (let i = 0; i < 5; i++) {
+    try {
+      const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
+        name?: string;
+        version?: string;
+      };
+      if (typeof pkg.version === "string" && (pkg.name ?? "").includes(nameHint))
+        return pkg.version;
+    } catch {
+      // not here; keep walking
+    }
+    const up = dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return undefined;
+}
+
 export interface ActionEnvelope {
   contract_version: string;
   envelope_id: string;
   harness: { name: HarnessName; version: string; adapter_version: string; interactive?: boolean };
   session_id: string;
+  model?: Model;
   tool_use_id: string;
   tool: { raw_name: string };
   args: Record<string, unknown>;
@@ -75,6 +110,7 @@ export function probeRepo(cwd: string): Repo | undefined {
 export function buildEnvelope(input: {
   harness: HarnessName;
   harnessVersion?: string;
+  model?: Model | undefined;
   interactive?: boolean;
   sessionId: string;
   toolUseId: string;
@@ -103,5 +139,6 @@ export function buildEnvelope(input: {
     action_digest: actionDigest(input.tool, input.args, input.cwd, repo?.root),
   };
   if (repo) env.repo = repo;
+  if (input.model && (input.model.id || input.model.endpoint_kind)) env.model = input.model;
   return env;
 }

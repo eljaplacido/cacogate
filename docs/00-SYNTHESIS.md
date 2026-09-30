@@ -250,7 +250,7 @@ The local alternative is a grammar-constrained Ollama/llama-server model (qwen3.
                                                    └──────────────┬────────────────────────┘
                                                                   │ events (TrustLayer-compatible)
                                            ┌── evidence plane ────▼───────────────────────┐
-                                           │ cacogate ledger (JSONL chain + SQLite index) │
+                                           │ cacogate ledger (JSONL chain + JSONL index)  │
                                            │ → TrustLayer /v1/events · OTel GenAI spans   │
                                            │ → cb-gx10 log (milestones) → Windows brain   │
                                            └──────────────────────────────────────────────┘

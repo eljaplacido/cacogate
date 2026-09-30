@@ -50,10 +50,25 @@ fn unreadable(cfg: &Config, why: &str) -> i32 {
 }
 
 fn pre(cfg: &Config, payload: &Value) -> i32 {
-    let envelope = match claude::pre_to_envelope(payload, "unknown", &now_rfc3339()) {
+    let version = claude::harness_version(
+        std::env::var("AI_AGENT").ok().as_deref(),
+        std::env::var("CLAUDE_CODE_EXECPATH").ok().as_deref(),
+    );
+    let mut envelope = match claude::pre_to_envelope(payload, &version, &now_rfc3339()) {
         Ok(e) => e,
         Err(e) => return unreadable(cfg, &e.to_string()),
     };
+    // Record what drove the decision: the model is not in the hook payload,
+    // but the transcript it points at names it on every assistant message.
+    envelope.model = payload
+        .get("transcript_path")
+        .and_then(Value::as_str)
+        .and_then(|p| read_tail(p, 256 * 1024))
+        .and_then(|t| claude::model_from_transcript_tail(&t))
+        .map(|id| cacogate_contracts::Model {
+            id: Some(id),
+            endpoint_kind: Some("anthropic".into()),
+        });
     let Some(g) = gate::decide(cfg, &envelope) else {
         return if cfg.mode == GateMode::Enforce { 2 } else { 0 };
     };
@@ -88,4 +103,15 @@ fn post(cfg: &Config, payload: &Value) -> i32 {
         gate::spool(cfg, "execution_not_recorded", &e.to_string());
     }
     0
+}
+
+/// Last `max` bytes of a file, lossily decoded (best effort).
+fn read_tail(path: &str, max: u64) -> Option<String> {
+    use std::io::{Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    f.seek(SeekFrom::Start(len.saturating_sub(max))).ok()?;
+    let mut buf = Vec::new();
+    f.take(max).read_to_end(&mut buf).ok()?;
+    Some(String::from_utf8_lossy(&buf).into_owned())
 }

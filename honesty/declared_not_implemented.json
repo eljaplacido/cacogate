@@ -85,6 +85,26 @@
       "id": "adapters-skills-in-plugin",
       "claim": "Agent skills (§9) bundled in the Claude Code plugin",
       "doc": "docs/01-BLUEPRINT.md#9"
+    },
+    {
+      "id": "ledger-sqlite-index",
+      "claim": "SQLite decision index (the index is JSONL today)",
+      "doc": "docs/01-BLUEPRINT.md#1.2"
+    },
+    {
+      "id": "worktree-roots",
+      "claim": "Treat sibling git worktrees of the same repository as inside the root (largest remaining DEF-FS-002 / INV-FS-001 source on real traffic; needs a contract change and an owner decision)",
+      "doc": "honesty/readings.jsonl#R-014"
+    },
+    {
+      "id": "unmeasured-holds",
+      "claim": "132 of 17,398 real calls still held as could-not-measure (reassigned or computed variables, globs)",
+      "doc": "honesty/readings.jsonl#R-013"
+    },
+    {
+      "id": "corpus-labels-review",
+      "claim": "Owner review of the Claude-assigned labels in conformance/corpus/real_firings.jsonl",
+      "doc": "conformance/corpus/README.md"
     }
   ],
   "pending_close": [
@@ -108,7 +128,7 @@
     },
     {
       "id": "ledger",
-      "claim": "Hash-chained per-session ledger with redaction and sqlite index",
+      "claim": "Hash-chained per-session ledger with redaction and a JSONL decision index (SQLite index not built)",
       "tests": [
         "LD-*",
         "RD-*"
@@ -151,6 +171,61 @@
       "tests": [
         "AD-016",
         "PO-008"
+      ]
+    },
+    {
+      "id": "daemon-identity",
+      "claim": "Adapters trust only the identified daemon (per-boot nonce, policy digest, reply bound to the envelope sent); doctor verifies it",
+      "tests": [
+        "EN-007",
+        "EN-008",
+        "EN-009",
+        "AD-017"
+      ]
+    },
+    {
+      "id": "decision-instrumentation",
+      "claim": "Harness version and model recorded on envelopes (Claude Code, pi/omp, OpenCode; gnomon via env)",
+      "tests": [
+        "CC-006",
+        "CC-007",
+        "AD-018"
+      ]
+    },
+    {
+      "id": "action-rate-meter",
+      "claim": "Per-rule firing, per-mode would-refuse rate and gate-file reads in status",
+      "tests": [
+        "EN-010",
+        "EN-011"
+      ]
+    },
+    {
+      "id": "real-traffic-corpus",
+      "claim": "cacogate corpus replay, harvest script, labelled real-traffic fixtures",
+      "tests": [
+        "PO-009",
+        "PO-010",
+        "PO-011"
+      ]
+    },
+    {
+      "id": "precision-fixes-2026-09-28",
+      "claim": "Pipe-to-interpreter, systemctl privilege, gh download, restore --staged, single-literal variable tracking",
+      "tests": [
+        "FA-014",
+        "FA-015",
+        "FA-016",
+        "SH-015"
+      ]
+    },
+    {
+      "id": "linked-roots-and-user-install",
+      "claim": "Linked worktrees and the Claude Code session's own memory dir count as the workspace; user-level install (systemd unit, plugin marketplace); shadow review with harm x held labelling queue",
+      "tests": [
+        "PO-012",
+        "RP-003",
+        "RP-004"
       ]
     }
   ],

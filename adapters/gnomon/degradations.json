@@ -3,10 +3,25 @@
   "adapter": "cacogate run (degraded path)",
   "verified_with": "gnomon 0.2.3+aafea2a",
   "degradations": [
-    { "id": "gnomon_refusal_bucket", "detail": "gnomon records a gate refusal (exit 126) as an ordinary bash result, not as a refusal: its outcome bucket and task exit code do not reflect the gate." },
-    { "id": "gnomon_file_tools_ungated", "detail": "Only bash passes through the gate. write/edit/webfetch/task/MCP calls are governed by gnomon's own write_allow, approval and surface guards, not by cacogate." },
-    { "id": "gnomon_no_ask", "detail": "ask_human, sandbox and canary verdicts refuse (exit 126): the wrapper cannot reach gnomon's Approver." },
-    { "id": "gnomon_session_id_derived", "detail": "gnomon passes no session id to child processes; the wrapper uses gnomon-<pid of nearest non-shell ancestor>, or $CACOGATE_SESSION when set." },
-    { "id": "gnomon_prompt_dependent", "detail": "The model must prefix commands itself (system.md). An unprefixed command is refused by bash_allow, which fails closed but costs a turn." }
+    {
+      "id": "gnomon_refusal_bucket",
+      "detail": "gnomon records a gate refusal (exit 126) as an ordinary bash result, not as a refusal: its outcome bucket and task exit code do not reflect the gate."
+    },
+    {
+      "id": "gnomon_file_tools_ungated",
+      "detail": "Only bash passes through the gate. write/edit/webfetch/task/MCP calls are governed by gnomon's own write_allow, approval and surface guards, not by cacogate."
+    },
+    {
+      "id": "gnomon_no_ask",
+      "detail": "ask_human, sandbox and canary verdicts refuse (exit 126): the wrapper cannot reach gnomon's Approver."
+    },
+    {
+      "id": "gnomon_session_id_derived",
+      "detail": "gnomon passes no session id to child processes; the wrapper uses gnomon-<pid of nearest non-shell ancestor>, or $CACOGATE_SESSION when set. Harness version and model are recorded only when CACOGATE_HARNESS_VERSION / CACOGATE_MODEL are exported."
+    },
+    {
+      "id": "gnomon_prompt_dependent",
+      "detail": "The model must prefix commands itself (system.md). An unprefixed command is refused by bash_allow, which fails closed but costs a turn."
+    }
   ]
 }

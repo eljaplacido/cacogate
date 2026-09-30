@@ -1,0 +1,11 @@
+{
+  "name": "cacogate-local",
+  "owner": { "name": "Elja Placido" },
+  "plugins": [
+    {
+      "name": "cacogate",
+      "source": "./claude-code",
+      "description": "Every tool call is checked by the local cacogate daemon before it runs. Shadow mode records; enforce mode refuses."
+    }
+  ]
+}

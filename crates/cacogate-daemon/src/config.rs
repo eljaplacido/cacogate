@@ -125,6 +125,12 @@ impl Config {
         if let Some(b) = &self.file.protected_branches {
             p.protected_branches.extend(b.iter().cloned());
         }
+        // A custom data dir moves the identity file and the ledger; protect
+        // them wherever they are.
+        let data = self.data_dir.to_string_lossy();
+        p.secrets
+            .push(format!("{data}/{}", crate::identity::IDENTITY_FILE));
+        p.self_protect.push(format!("{data}/**"));
         p
     }
 }

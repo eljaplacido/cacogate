@@ -1,0 +1,15 @@
+# User unit for the cacogate daemon (loopback only, 127.0.0.1:4320).
+# Mode comes from ~/.config/cacogate/config.toml (`mode = "enforce"`) or is
+# shadow when unset. Installed by scripts/install-user.sh.
+[Unit]
+Description=cacogate action gate daemon
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.cargo/bin/cacogate daemon
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

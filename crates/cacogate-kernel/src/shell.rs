@@ -7,6 +7,8 @@
 //! substitutions and `bash -c` strings so their inner commands are gated too.
 //! Matching happens on the resulting argv tokens, never on the raw string.
 
+use std::collections::HashMap;
+
 /// How completely the command line was understood.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -33,6 +35,8 @@ pub struct SimpleCommand {
     pub piped_from: Option<Vec<String>>,
     /// Nesting depth (0 = top level, >0 = inside substitution / `-c`).
     pub depth: u8,
+    /// Leading `VAR=value` words (removed from `argv`).
+    pub assignments: Vec<String>,
 }
 
 /// Parse result.
@@ -107,27 +111,33 @@ fn parse_into(src: &str, depth: u8, out: &mut Parsed) {
     let mut pending_redir: Option<bool> = None;
     let mut pending_heredoc = false;
     let mut prev_pipe_argv: Option<Vec<String>> = None;
-    let flush =
-        |cur: &mut SimpleCommand, out: &mut Parsed, pipe: bool, prev: &mut Option<Vec<String>>| {
-            let taken = std::mem::replace(
-                cur,
-                SimpleCommand {
-                    depth,
-                    ..SimpleCommand::default()
-                },
-            );
-            let argv_for_next = taken.argv.clone();
-            if !taken.argv.is_empty() || !taken.writes.is_empty() {
-                let mut cmd = taken;
-                cmd.piped_from = prev.take();
-                post_process(cmd, depth, out);
-            } else {
-                *prev = None;
-            }
-            if pipe && !argv_for_next.is_empty() {
-                *prev = Some(argv_for_next);
-            }
-        };
+    let mut vars: HashMap<String, Var> = HashMap::new();
+    let flush = |cur: &mut SimpleCommand,
+                 out: &mut Parsed,
+                 pipe: bool,
+                 prev: &mut Option<Vec<String>>,
+                 vars: &mut HashMap<String, Var>| {
+        let mut taken = std::mem::replace(
+            cur,
+            SimpleCommand {
+                depth,
+                ..SimpleCommand::default()
+            },
+        );
+        expand_vars(&mut taken, vars);
+        track_vars(&taken, vars);
+        let argv_for_next = taken.argv.clone();
+        if !taken.argv.is_empty() || !taken.writes.is_empty() {
+            let mut cmd = taken;
+            cmd.piped_from = prev.take();
+            post_process(cmd, depth, out);
+        } else {
+            *prev = None;
+        }
+        if pipe && !argv_for_next.is_empty() {
+            *prev = Some(argv_for_next);
+        }
+    };
     for tok in toks {
         match tok {
             Tok::Word(w) => {
@@ -141,6 +151,7 @@ fn parse_into(src: &str, depth: u8, out: &mut Parsed) {
                     }
                 } else if cur.argv.is_empty() && is_assignment(&w) {
                     // leading VAR=value: environment, not a command word
+                    cur.assignments.push(w);
                 } else {
                     cur.argv.push(w);
                 }
@@ -150,7 +161,7 @@ fn parse_into(src: &str, depth: u8, out: &mut Parsed) {
             Tok::Sep(pipe) => {
                 pending_redir = None;
                 pending_heredoc = false;
-                flush(&mut cur, out, pipe, &mut prev_pipe_argv);
+                flush(&mut cur, out, pipe, &mut prev_pipe_argv, &mut vars);
             }
         }
     }
@@ -161,7 +172,7 @@ fn parse_into(src: &str, depth: u8, out: &mut Parsed) {
             "redirection without a target",
         );
     }
-    flush(&mut cur, out, false, &mut prev_pipe_argv);
+    flush(&mut cur, out, false, &mut prev_pipe_argv, &mut vars);
     for inner in nested {
         parse_into(&inner, depth + 1, out);
     }
@@ -213,6 +224,156 @@ fn post_process(mut cmd: SimpleCommand, depth: u8, out: &mut Parsed) {
         _ => {}
     }
     out.commands.push(cmd);
+}
+
+/// What is statically known about a shell variable within one script.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Var {
+    /// Assigned exactly once, to a literal value.
+    Literal(String),
+    /// Reassigned, computed, a loop/read target, or only a command prefix.
+    Ambiguous,
+}
+
+/// Record what a command does to shell variables.
+///
+/// Measured on 17,398 real agent tool calls (2026-09-28, R-013): 732 would-be
+/// refusals came from no rule at all but from writes to `$VAR/…`, and 523 of
+/// 582 such variables were assigned exactly once, to a literal, earlier in
+/// the same command (`S=/tmp/scratch; … > $S/log`). Only that case is
+/// resolved; everything else stays unresolved (could not measure).
+fn track_vars(cmd: &SimpleCommand, vars: &mut HashMap<String, Var>) {
+    let mut set = |name: &str, value: Option<&str>| {
+        let v = match (vars.get(name), value) {
+            (None, Some(val)) if is_literal(val) => Var::Literal(val.to_owned()),
+            _ => Var::Ambiguous,
+        };
+        vars.insert(name.to_owned(), v);
+    };
+    // Assignments can also follow a keyword (`then S=/`), where the lexer
+    // has already started argv; collect them from both places.
+    let after_kw: Vec<&str> = cmd
+        .argv
+        .iter()
+        .map(String::as_str)
+        .skip_while(|w| KEYWORDS.contains(w))
+        .collect();
+    let lead = after_kw.iter().take_while(|w| is_assignment(w)).count();
+    let assigns: Vec<&str> = cmd
+        .assignments
+        .iter()
+        .map(String::as_str)
+        .chain(after_kw.iter().take(lead).copied())
+        .collect();
+    let words: Vec<&str> = after_kw.iter().skip(lead).copied().collect();
+    if words.is_empty() {
+        // A standalone assignment statement sets shell variables.
+        for a in &assigns {
+            if let Some((name, value)) = a.split_once('=') {
+                set(name, Some(value));
+            }
+        }
+        return;
+    }
+    // `S=x cmd` sets S for that command only; the shell's S is unknown.
+    for a in &assigns {
+        if let Some((name, _)) = a.split_once('=') {
+            set(name, None);
+        }
+    }
+    let first = words.first().copied().unwrap_or("");
+    let operands = || words.iter().skip(1).filter(|w| !w.starts_with('-'));
+    match first {
+        "export" | "declare" | "local" | "readonly" | "typeset" => {
+            for w in operands() {
+                if let Some((name, value)) = w.split_once('=') {
+                    if is_name(name) {
+                        set(name, Some(value));
+                    } else if let Some(n) = name.strip_suffix('+') {
+                        set(n, None);
+                    }
+                }
+            }
+        }
+        "for" | "select" => {
+            if let Some(n) = words.get(1) {
+                set(n, None);
+            }
+        }
+        "read" | "mapfile" | "readarray" | "getopts" | "let" | "unset" => {
+            for w in operands() {
+                let n = w.split(['=', '+', '[']).next().unwrap_or("");
+                if is_name(n) {
+                    set(n, None);
+                }
+            }
+        }
+        _ => {}
+    }
+    // `S+=x` anywhere is an append.
+    for w in &words {
+        if let Some((name, _)) = w.split_once("+=")
+            && is_name(name)
+        {
+            set(name, None);
+        }
+    }
+}
+
+fn is_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && !s.starts_with(|c: char| c.is_ascii_digit())
+}
+
+fn is_literal(v: &str) -> bool {
+    !v.contains(['$', '`', '*', '?', '[', '(', '{'])
+}
+
+/// Substitute `$NAME` / `${NAME}` when NAME is a known literal. A word that
+/// references any variable not known to be literal is left untouched, so it
+/// stays unresolved downstream.
+fn expand_vars(cmd: &mut SimpleCommand, vars: &HashMap<String, Var>) {
+    if vars.is_empty() {
+        return;
+    }
+    let expand = |w: &mut String| {
+        if !w.contains('$') {
+            return;
+        }
+        let mut out = String::with_capacity(w.len());
+        let mut rest = w.as_str();
+        while let Some(i) = rest.find('$') {
+            out.push_str(rest.get(..i).unwrap_or(""));
+            let after = rest.get(i + 1..).unwrap_or("");
+            let (name, used) = if let Some(inner) = after.strip_prefix('{') {
+                match inner.find('}') {
+                    Some(j) => (inner.get(..j).unwrap_or(""), j + 2),
+                    None => return,
+                }
+            } else {
+                let n = after
+                    .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                    .unwrap_or(after.len());
+                (after.get(..n).unwrap_or(""), n)
+            };
+            match vars.get(name) {
+                Some(Var::Literal(v)) if is_name(name) => out.push_str(v),
+                _ => return, // unknown or ambiguous: leave the word as written
+            }
+            rest = after.get(used..).unwrap_or("");
+        }
+        out.push_str(rest);
+        *w = out;
+    };
+    for w in cmd
+        .argv
+        .iter_mut()
+        .chain(cmd.writes.iter_mut())
+        .chain(cmd.reads.iter_mut())
+    {
+        expand(w);
+    }
 }
 
 fn is_assignment(w: &str) -> bool {
@@ -649,6 +810,54 @@ mod tests {
     #[test]
     fn test_sh010_assignments_are_not_programs() {
         assert_eq!(argvs("FOO=1 BAR=x cargo test"), vec![vec!["cargo", "test"]]);
+    }
+
+    #[test]
+    fn test_sh015_single_literal_assignments_are_expanded_nothing_else() {
+        let one = |s: &str| parse(s).commands;
+        // Resolved: assigned once, to a literal, before use.
+        let c = one("S=/tmp/x; rm -rf $S/y");
+        assert_eq!(
+            c.last().map(|c| c.argv.clone()),
+            Some(vec!["rm".into(), "-rf".into(), "/tmp/x/y".into()])
+        );
+        let c = one("S=/tmp/x && echo hi > ${S}/log");
+        assert_eq!(
+            c.last().map(|c| c.writes.clone()),
+            Some(vec!["/tmp/x/log".to_owned()])
+        );
+        let c = one("export OUT=/tmp/o; cp a $OUT/b");
+        assert_eq!(
+            c.last().and_then(|c| c.argv.get(2).cloned()).as_deref(),
+            Some("/tmp/o/b")
+        );
+        // A hazard hidden behind a variable becomes visible.
+        let c = one("S=/; rm -rf $S");
+        assert_eq!(
+            c.last().and_then(|c| c.argv.get(2).cloned()).as_deref(),
+            Some("/")
+        );
+        // Left unresolved: reassigned, computed, loop/read targets, prefixes.
+        for src in [
+            "S=/tmp/x; S=/; rm -rf $S",
+            "S=/tmp/x; if true; then S=/; fi; rm -rf $S",
+            "S=$(pwd); rm -rf $S",
+            "S=/tmp/x; for S in a b; do rm -rf $S; done",
+            "S=/tmp/x; read S; rm -rf $S",
+            "S=/tmp/x cmd; rm -rf $S",
+            "S=/tmp/x; S+=/y; rm -rf $S",
+            "rm -rf $UNSET/x",
+        ] {
+            let rm = one(src)
+                .into_iter()
+                .find(|c| c.argv.first().map(String::as_str) == Some("rm"))
+                .unwrap_or_default();
+            assert!(
+                rm.argv.iter().any(|a| a.contains('$')),
+                "must stay unresolved: {src} -> {:?}",
+                rm.argv
+            );
+        }
     }
 
     #[test]

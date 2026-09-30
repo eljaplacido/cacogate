@@ -10,8 +10,12 @@ that the role's allow-list forces every command through.
 In `.gnomon/roles.toml`, for each role that holds `bash`:
 
 ```toml
-bash_allow = ['^cacogate run( |$)']   # or the absolute path to the binary
+bash_allow = ['^cacogate run( |$)']
 ```
+
+Put `cacogate` on PATH rather than writing its absolute path here: `roles.toml`
+is part of gnomon's surface hash, and a machine-specific path would give every
+machine a different hash for the same behaviour.
 
 Keep the role's existing `bash_deny`. Deny wins in gnomon, so the two layers
 stack and cacogate can only tighten.
@@ -23,6 +27,15 @@ Append to `.gnomon/system.md`:
 Every shell command must be run through the gate: prefix it with `cacogate run -- `.
 Example: `cacogate run -- ls -la`. A refused command exits 126 and prints why;
 do not retry or work around a refusal.
+```
+
+gnomon passes nothing about itself to the commands it runs. To record what
+drove each decision, export these in the environment gnomon runs in (they
+stay out of the surface):
+
+```sh
+export CACOGATE_HARNESS_VERSION="$(gnomon --version | cut -d' ' -f1)"
+export CACOGATE_MODEL=qwen3.6:35b        # the role's model
 ```
 
 Both files are part of gnomon's surface hash, so the change is visible to

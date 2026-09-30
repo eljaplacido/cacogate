@@ -36,7 +36,25 @@ pub(crate) fn run(cfg: &Config, harness: HarnessName, argv: &[String]) -> i32 {
     );
     let envelope = match wrap::envelope(harness, &session, &tool_use_id, argv, &cwd, &now_rfc3339())
     {
-        Ok(e) => e,
+        Ok(mut e) => {
+            // Hookless harnesses pass nothing about themselves to a child
+            // process; the operator can, so the ledger records what drove
+            // the decision (see adapters/gnomon/README.md).
+            if let Ok(v) = std::env::var("CACOGATE_HARNESS_VERSION")
+                && !v.is_empty()
+            {
+                e.harness.version = v;
+            }
+            if let Ok(m) = std::env::var("CACOGATE_MODEL")
+                && !m.is_empty()
+            {
+                e.model = Some(cacogate_contracts::Model {
+                    id: Some(m),
+                    endpoint_kind: None,
+                });
+            }
+            e
+        }
         Err(e) => {
             gate::spool(cfg, "payload_unreadable", &e.to_string());
             if cfg.mode == GateMode::Enforce {

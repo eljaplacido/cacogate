@@ -64,7 +64,7 @@ T0–T4 are **pure functions** over `(envelope, session_state, policy, rig_snaps
 | **Conformal engine** `[IP]` | assurance | Applies a signed `CalibrationArtifact`: per-stratum, per-mode thresholds λ̂ₘ from conformal risk control. Online ACI update and an exchangeability martingale for detecting distribution shift. |
 | **Ladder + capability** `[IP]` | assurance | Weakest-allowed combination. Mints `Capability` = HMAC(action_digest, mode, decision_digest, ttl, nonce), consumed once. |
 | **Sandbox backends** | assurance | `bwrap` (default on Linux), `docker --network none`, `nemoclaw/openshell` (after onboarding). Each **declares** what it confines (fs / network / credentials / process) and self-tests at startup. |
-| **Ledger** | evidence | Append-only JSONL hash chain per session, a SQLite index (`~/.local/share/cacogate/ledger.sqlite`; **never** named `brain.db`) and Ed25519 checkpoints. Exporters: TrustLayer `/v1/events`, OTel GenAI spans (`execute_tool` + `cacogate.*` attributes), W3C PROV bundles, `cb-gx10 log` milestones. |
+| **Ledger** | evidence | Append-only JSONL hash chain per session and a JSONL decision index (`~/.local/share/cacogate/index.jsonl`; a SQLite index is planned, **never** named `brain.db`); Ed25519 checkpoints are planned. Each index row carries the rules that fired and any gate files the action read. Exporters: TrustLayer `/v1/events`, OTel GenAI spans (`execute_tool` + `cacogate.*` attributes), W3C PROV bundles, `cb-gx10 log` milestones. |
 | **Outcome labeller** | evidence | Joins each decision to its realised outcome: PostToolUse exit bucket, subsequent test/verify results, reverts within N turns or commits, CI status, human post-hoc labels. Emits `OutcomeRecord`s, which are the calibration data. |
 | **Lab** (Python, offline) | R&D | Fits scorers, runs CRC calibration, runs causal studies with `causal-core`, runs the Jev/S1 bake-off, runs benchmarks, writes signed artefacts. **Never on the hot path.** |
 | **Surfaces** | UX | Inline harness packets, the `cacogate` CLI and TUI, and a local web app served by the daemon. |
@@ -219,6 +219,13 @@ obligations = [{ kind = "run", match = "test_command" }]
 - α is always labelled `target`.
 - The measured held-out false-allow rate is reported with a Clopper-Pearson CI, and n per stratum is always shown.
 
+**A dial, not a promise (measured, 2026-09-26 "What To Build Next" report).** On 1,724 agent runs, split-conformal coverage held on a random split (0.904 at a nominal 0.90) and failed on held-out experiments, the only condition anyone deploys in: 0.78 at a nominal 0.90, 0.58 at 0.80. Per-harness coverage ranged down to 0.69 (gnomon included). What survived is that α moved the escalation rate monotonically (0% to 33%). (Readings R-001…R-005.) That study predicted run pass/fail rather than per-action harm, so it does not transfer as a number; it transfers as a design rule:
+- The conformal check is an **escalation dial**: α sets how much gets escalated. No packet, dashboard or document states a coverage guarantee.
+- **Strata are harness × action class** (Mondrian), not action class alone, and coverage is reported per stratum, never pooled.
+- **Validation is on a held-out regime** (a new repository, model or harness version), not a random split. See B1.
+- **Recalibrate on every regime change.** The `stale` status fires when a bound digest changes (harness version, model, policy, scorer, toolset), which is exactly when coverage degrades silently. This is why the adapters record harness version and model on every envelope.
+- **Build rules from shadow-mode near-misses** (actions held in shadow that were later reverted, or allowed ones that caused harm), not from a list of commands that sound dangerous.
+
 ### 3.4 Budget check
 
 - Each session and agent has a risk budget β (preregistered).
@@ -233,6 +240,7 @@ obligations = [{ kind = "run", match = "test_command" }]
 - Providers: `local-s1`, a grammar-constrained Ollama model with logprobs and temperature scaling (qwen3.6:35b, nemotron-3-nano:4b for speed), and `jev` (pinned `jev-1.13.0`, `TYPESAFE_API_KEY`, `sensitivity=public` only).
 - **Type wall.** `Answers` can only flow into scorer features, enforced by the type system (Rust newtype plus the Python mypy test from Oracle). Nothing in the ladder accepts a probability.
 - Enabling a question in production requires a passed bake-off artefact (benchmark B6).
+- **Margin, not confidence.** Measured elsewhere in the portfolio, a model's stated confidence correlated 0.069 with whether escalating helped (R-006), worse than random as a trigger; the decision margin was the only trigger that beat doing nothing. Features derived from typed answers are therefore the **margin** (gap between the top two options) or the **prediction-set size**, never the raw confidence. A calibration curve on a corpus where the answer is true by construction comes before any use (B6).
 
 ### 3.6 Evidence-bound capability `[IP]`
 
@@ -328,6 +336,8 @@ Starter schemas are in `contracts/v0/`.
 - **Retry-evasion detector**: when an action shares ≥ τ normalised features with a blocked action in the same session, it inherits that block's rung.
 - **Composition detector**: a temporal rule for multi-step exfiltration, e.g. `read secret` then `network write`.
 - Capabilities bound to the digest.
+- **Daemon identity, not liveness.** Adapters accept a decision only from the daemon that published `<data_dir>/daemon.json` (per-boot nonce in the `x-cacogate-daemon` header, matching policy digest) and only when the decision's `envelope_digest` is the digest of the envelope they sent. A stale process, a foreign listener or an agent-started decoy on the port is ignored and the local fail-closed decision applies (EN-009, AD-017). Limit: a same-user process that reads `daemon.json` can echo the nonce; reading it is a secret-touch that goes to a person.
+- **Gate reads are measured.** Reading the gate's own files is allowed but recorded (EN-011). After a refusal, agents have been observed reading the gate's script to work around it, so adapters install at user level by default (outside the working tree).
 - Labels accepted only from auto sources or authenticated humans; any label source may be corrupted, so outcome labels are checked against **independent event capture** (harness transcript hash vs ledger).
 - Signed policy packs and calibration artefacts (skillvault ATTESTATION format).
 
@@ -428,7 +438,7 @@ cacogate/
 │   ├── cacogate-contracts/   # serde types, schema round-trip tests
 │   ├── cacogate-kernel/      # PURE: facts, shell parse, symbolic, temporal monitor, rig query,
 │   │                         #       conformal apply, budget, ladder, packet render
-│   ├── cacogate-ledger/      # chain, checkpoints, sqlite index, exporters (TrustLayer, OTel, PROV)
+│   ├── cacogate-ledger/      # chain, index (JSONL; SQLite planned), checkpoints, exporters (TrustLayer, OTel, PROV)
 │   ├── cacogate-sandbox/     # backends (bwrap, docker, nemoclaw) + self-tests
 │   ├── cacogate-rig/         # repository impact graph builder (tree-sitter, cargo/pnpm metadata)
 │   ├── cacogate-daemon/      # axum http + unix socket, capability mint/consume, labeller, S1 providers
@@ -549,14 +559,28 @@ Each benchmark has `benchmarks/B*/PRE-REGISTRATION.md` with a TOML bars block, `
 | ID | Question | Primary endpoint | Falsifier |
 |---|---|---|---|
 | **B0** | Does shadow mode observe everything? | Fraction of harness tool calls with a ledger envelope, per harness | < 99.5% on any harness without a declared degradation |
-| **B1** | Is the conformal false-allow rate valid? | Held-out false-allow rate vs α target, per stratum, Clopper-Pearson | Upper CI bound > α + 0.02 at n ≥ n_min |
-| **B2** (= AgentLab **AG4**) | Does the gate reduce bad executions at acceptable cost? | blocked-bad, blocked-good, added latency | False-block rate exceeds benefit, or latency > 10% of turn time |
-| **B3** | Does it hurt task success? | pass^k and merge-worthy rate (SeptaCore ADR-0008), gate on vs off, paired McNemar, ≥ 3 trials per arm | A significant drop beyond the preregistered margin |
+| **B1** | Is the conformal false-allow rate valid? | False-allow rate vs α target per harness × class stratum, Clopper-Pearson, **calibrated on some regimes and measured on a held-out regime** (new repo/model/harness version); a random split is reported only as a sanity check | Upper CI bound > α + 0.02 at n ≥ n_min on the held-out regime |
+| **B2** (= AgentLab **AG4**) | Does the gate reduce bad executions at acceptable cost? | **Primary: the 2×2 of harmful × refused per action** (prevented harm vs false refusals), plus added latency. Sized on effect × the shadow-measured action rate | False-block rate exceeds benefit, or latency > 10% of turn time |
+| **B3** | Does it hurt task success? | **Non-inferiority guardrail, not the primary endpoint:** a deny-gate can only remove capability, so task success can only fall. pass^k and merge-worthy rate (SeptaCore ADR-0008), gate on vs off, paired, arms interleaved | A drop beyond the preregistered non-inferiority margin |
 | **B4** | Robustness to shift (RQ2) | Coverage loss and time-to-detect after switching repository, model or harness | Undetected coverage violation lasting > W actions |
 | **B5** | Decision-packet experiment (Phase D) | Override correctness, comprehension, response time and fatigue across packet variants | The richer packet shows no improvement over the minimal packet (itself a publishable null) |
 | **B6** | Jev / local S1 bake-off | ECE and set size at matched coverage, on mutants with n ≥ 300 and escape options on/off | ECE ≥ 0.05 ⇒ feature not enabled |
 | **B7** | Adversarial robustness (RQ12) | Containment rate on injection, evasion and poisoning corpora | Any invariant bypass |
 | **B8** | MNAR bias (RQ7) | Calibration bias of executed-only labels vs labels that include shadow counterfactuals | — (exploratory, labelled as such) |
+
+**Preregistration rules (from the 2026-09-26 measurement review; each removes a class of wrong number).**
+1. **Absent is not zero.** A run that errors reports `not_measured` with the reason; an arm failing more than a small fraction of its calls is excluded, never scored at the floor.
+2. **Declare the unit of analysis** (action, session, task, pair) and power-check against that count, not the row count.
+3. **Size on effect × action rate.** A gate that acts on a fifth of units dilutes its effect fivefold. The action rate comes from shadow mode (`cacogate status`, `cacogate corpus`) before anything is sized.
+4. **Prove the check can resolve something:** report ties at the top and the headroom; show the gate *will* fire on observed failures, not only on a wrong answer someone wrote.
+5. **Interleave arms.** Never run one arm entirely before the other; batch drift was measured at 0.885 vs 0.538 on identical inputs (R-007).
+6. **Intention-to-treat.** Every unit analysed as assigned; never split results by whether the gate fired (that selects on difficulty). Mechanisms (occurrence, catch, conversion, cost) are reported as mechanisms, not subgroup effects.
+7. **No interim looks count**, like exploratory runs.
+8. **Null replay:** run identical inputs twice; the metric must not move by more than its interval.
+9. **Nothing the agent can read may carry the treatment**, including notes explaining it.
+10. **Readiness proves identity:** a harness or gateway health check must show it is the process that was started (the daemon-identity rule, applied to the lab).
+
+**Standing randomised holdout (for labels, never for invariants).** Observational outcome labels cannot reveal an unlogged driver (B8). Once sandboxing exists, a small preregistered share of *reversible, low-risk* actions that the policy would allow directly is randomised between `direct` and `sandbox`, giving unbiased outcome labels for calibration. Invariant and defeasible rules are never randomised; shadow mode is the free substitute until then.
 
 **Where the benchmarks run.**
 - Locally on gx10 for B0, B1, B2, B4, B6 and B7.

@@ -70,6 +70,13 @@ pub struct IndexRow {
     pub summary: String,
     /// Tool-call id (joins to executions).
     pub tool_use_id: String,
+    /// Ids of the checks that failed on this decision (the rules that fired).
+    /// Absent on rows written before rule metering existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fired: Vec<String>,
+    /// Gate files this action read (allowed, but measured).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gate_reads: Vec<String>,
 }
 
 /// Result of verifying one chain.

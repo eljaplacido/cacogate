@@ -8,11 +8,15 @@
 //! - `GET  /v1/decisions?limit=N`
 //! - `GET  /v1/decisions/{id}`
 //! - `GET  /v1/sessions/{id}/verify`
+//!
+//! Every reply carries the per-boot nonce in `x-cacogate-daemon` (see
+//! [`crate::identity`]), so adapters can tell the daemon from a squatter.
 
 use crate::engine::{Engine, EngineError};
+use crate::identity::{self, DaemonIdentity, IDENTITY_HEADER};
 use axum::Router;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use cacogate_contracts::{ActionEnvelope, ExecutionRecord};
@@ -28,6 +32,8 @@ pub struct AppState {
     pub engine: Engine,
     /// Start time.
     pub started: Instant,
+    /// Per-boot nonce stamped on every reply.
+    pub nonce: String,
 }
 
 struct ApiError(StatusCode, String);
@@ -60,7 +66,18 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/decisions", get(decisions))
         .route("/v1/decisions/{id}", get(decision))
         .route("/v1/sessions/{id}/verify", get(verify))
+        .layer(axum::middleware::map_response_with_state(
+            state.clone(),
+            stamp_identity,
+        ))
         .with_state(state)
+}
+
+async fn stamp_identity(State(s): State<Arc<AppState>>, mut res: Response) -> Response {
+    if let Ok(v) = HeaderValue::from_str(&s.nonce) {
+        res.headers_mut().insert(IDENTITY_HEADER, v);
+    }
+    res
 }
 
 async fn health(State(s): State<Arc<AppState>>) -> Json<Value> {
@@ -150,12 +167,27 @@ async fn verify(State(s): State<Arc<AppState>>, Path(id): Path<String>) -> Json<
     Json(json!(s.engine.ledger().verify_session(&id)))
 }
 
-/// Serve until Ctrl-C / SIGTERM.
-pub async fn serve(addr: &str, state: Arc<AppState>) -> std::io::Result<()> {
+/// Serve until Ctrl-C / SIGTERM. After the port is bound (and only then),
+/// publish the daemon's identity in `data_dir`; remove it on shutdown.
+pub async fn serve(
+    addr: &str,
+    state: Arc<AppState>,
+    data_dir: &std::path::Path,
+) -> std::io::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, router(state))
+    let id = DaemonIdentity {
+        pid: std::process::id(),
+        addr: listener.local_addr()?.to_string(),
+        nonce: state.nonce.clone(),
+        policy_digest: state.engine.policy().digest.clone(),
+        started: crate::engine::now_rfc3339(),
+    };
+    identity::write(data_dir, &id)?;
+    let result = axum::serve(listener, router(state))
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })
-        .await
+        .await;
+    identity::remove_if_ours(data_dir, &id.nonce);
+    result
 }

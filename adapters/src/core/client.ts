@@ -1,5 +1,32 @@
 // Daemon client plus the fail-safe fallback used when the daemon is unreachable.
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ActionEnvelope } from "./envelope.js";
+import { digest } from "./jcs.js";
+
+/** Header on every daemon reply carrying its per-boot nonce (crates/cacogate-daemon/src/identity.rs). */
+export const IDENTITY_HEADER = "x-cacogate-daemon";
+
+/** What the daemon publishes in `<data_dir>/daemon.json`. */
+export interface DaemonIdentity {
+  nonce: string;
+  policy_digest: string;
+}
+
+/** Read the published identity; undefined when no daemon has published one. */
+export function readIdentity(dataDir?: string): DaemonIdentity | undefined {
+  const env = typeof process === "undefined" ? {} : process.env;
+  const dir = dataDir ?? env.CACOGATE_DATA_DIR ?? join(homedir(), ".local/share/cacogate");
+  try {
+    const v = JSON.parse(readFileSync(join(dir, "daemon.json"), "utf8")) as Partial<DaemonIdentity>;
+    return typeof v.nonce === "string" && typeof v.policy_digest === "string"
+      ? { nonce: v.nonce, policy_digest: v.policy_digest }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export type Verdict =
   | "allow"
@@ -29,6 +56,10 @@ export interface ClientOptions {
   timeoutMs?: number;
   mode?: Mode;
   fetchImpl?: typeof fetch;
+  /** Data dir holding daemon.json (default $CACOGATE_DATA_DIR or ~/.local/share/cacogate). */
+  dataDir?: string;
+  /** Expected identity; overrides reading daemon.json (tests). `null` means none published. */
+  identity?: DaemonIdentity | null;
 }
 
 const READ_TOOLS = new Set([
@@ -51,7 +82,9 @@ export function enforcement(verdict: Verdict, mode: Mode): Enforcement {
   return "deny";
 }
 
-export function resolveOptions(o: ClientOptions = {}): Required<Omit<ClientOptions, "fetchImpl">> {
+export function resolveOptions(
+  o: ClientOptions = {},
+): Required<Omit<ClientOptions, "fetchImpl" | "dataDir" | "identity">> {
   const env = typeof process === "undefined" ? {} : process.env;
   const mode = (o.mode ?? env.CACOGATE_MODE ?? "shadow") === "enforce" ? "enforce" : "shadow";
   return {
@@ -78,9 +111,28 @@ export async function checkAction(env: ActionEnvelope, o: ClientOptions = {}): P
     });
     if (!res.ok) throw new Error(`daemon answered ${res.status}: ${await res.text()}`);
     const body = (await res.json()) as {
-      decision: { verdict: Verdict; mode?: Mode; decision_id: string };
+      decision: {
+        verdict: Verdict;
+        mode?: Mode;
+        decision_id: string;
+        policy_digest?: string;
+        envelope_digest?: string;
+      };
       packet: string;
     };
+    // Something answered; prove it is the daemon, and that the reply is about
+    // this action. Otherwise its verdict is discarded (fail-safe below).
+    const expected = o.identity === undefined ? readIdentity(o.dataDir) : (o.identity ?? undefined);
+    if (!expected) throw new Error("identity mismatch: no daemon.json, but something answered");
+    if (res.headers.get(IDENTITY_HEADER) !== expected.nonce) {
+      throw new Error("identity mismatch: reply is not from the daemon that wrote daemon.json");
+    }
+    if (body.decision.policy_digest !== expected.policy_digest) {
+      throw new Error("identity mismatch: decision policy differs from the daemon's");
+    }
+    if (body.decision.envelope_digest !== digest(JSON.parse(JSON.stringify(env)))) {
+      throw new Error("reply unbound: envelope_digest is not this action's");
+    }
     const mode = body.decision.mode ?? opts.mode;
     return {
       verdict: body.decision.verdict,

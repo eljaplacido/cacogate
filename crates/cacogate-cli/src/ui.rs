@@ -230,6 +230,38 @@ pub(crate) fn status(cfg: &Config) -> i32 {
                 "latency p50 {} µs · p95 {} µs (since daemon start)",
                 s["p50_latency_us"], s["p95_latency_us"]
             );
+            for (mode, m) in s["by_mode"].as_object().into_iter().flatten() {
+                let total = m["total"].as_u64().unwrap_or(0);
+                let held = m["would_hold"].as_u64().unwrap_or(0);
+                let pct = if total == 0 {
+                    0.0
+                } else {
+                    #[allow(clippy::cast_precision_loss)]
+                    let p = held as f64 * 100.0 / total as f64;
+                    p
+                };
+                let label = if mode == "shadow" {
+                    "would refuse"
+                } else {
+                    "refused"
+                };
+                println!("{mode:<11} {total} decisions · {label} {held} ({pct:.1}%)");
+            }
+            if s["gate_reads"].as_u64().unwrap_or(0) > 0 {
+                println!(
+                    "gate reads  {} actions read the gate's own files (allowed, recorded)",
+                    s["gate_reads"]
+                );
+            }
+            let mut rules: Vec<(&String, &Value)> =
+                s["by_rule"].as_object().into_iter().flatten().collect();
+            rules.sort_by_key(|(_, r)| std::cmp::Reverse(r["fired"].as_u64().unwrap_or(0)));
+            if !rules.is_empty() {
+                println!("rules       fired · held");
+                for (id, r) in rules {
+                    println!("  {id:<20} {:>5} · {}", r["fired"], r["held"]);
+                }
+            }
             for key in ["by_verdict", "by_class", "by_harness"] {
                 let parts: Vec<String> = s[key]
                     .as_object()
@@ -287,15 +319,33 @@ pub(crate) fn doctor(cfg: &Config) -> i32 {
         )
     );
     println!("mode      {:?}", cfg.mode);
-    let health = client(cfg).get::<Value>("/v1/health");
+    let health = client(cfg).get_identified::<Value>("/v1/health");
     match &health {
-        Ok(h) => println!(
-            "{}daemon  {} · policy {} · up {}s",
-            ok(true),
-            cfg.addr,
-            h["policy"].as_str().unwrap_or(""),
-            h["uptime_s"]
-        ),
+        Ok((h, header)) => {
+            let expected = cacogate_daemon::identity::read(&cfg.data_dir);
+            let verdict = cacogate_daemon::identity::verify(
+                expected.as_ref(),
+                header.as_deref(),
+                h["policy_digest"].as_str(),
+            );
+            println!(
+                "{}daemon  {} · policy {} · up {}s",
+                ok(verdict.is_ok()),
+                cfg.addr,
+                h["policy"].as_str().unwrap_or(""),
+                h["uptime_s"]
+            );
+            match verdict {
+                Ok(()) => println!(
+                    "    identity verified against {}",
+                    cacogate_daemon::identity::path(&cfg.data_dir).display()
+                ),
+                Err(m) => println!(
+                    "    NOT TRUSTED: {m}. Adapters will ignore it and decide locally (fail-closed). \
+                     Check that the daemon and the adapters share CACOGATE_DATA_DIR."
+                ),
+            }
+        }
         Err(e) => println!("{}daemon  {e}", ok(false)),
     }
     let data_ok = std::fs::create_dir_all(&cfg.data_dir).is_ok();
@@ -317,13 +367,18 @@ pub(crate) fn doctor(cfg: &Config) -> i32 {
         cwd.join(".claude/settings.local.json"),
     ]
     .iter()
-    .any(|p| file_mentions(p, "hook claude-code"));
+    .any(|p| file_mentions(p, "hook claude-code"))
+        // User-level plugin install (adapters/.claude-plugin marketplace).
+        || file_mentions(
+            &home.join(".claude/plugins/installed_plugins.json"),
+            "\"cacogate@",
+        );
     for (name, bin, hooked, how) in [
         (
             "Claude Code",
             "claude",
             Some(claude_hook),
-            "cacogate install claude-code --write",
+            "claude plugin marketplace add <repo>/adapters && claude plugin install cacogate@cacogate-local",
         ),
         (
             "OpenCode",
@@ -332,7 +387,7 @@ pub(crate) fn doctor(cfg: &Config) -> i32 {
                 cwd.join(".opencode/plugin"),
                 home.join(".config/opencode/plugin"),
             ])),
-            "cp adapters/dist/opencode/cacogate.js .opencode/plugin/",
+            "cp adapters/dist/opencode/cacogate.js ~/.config/opencode/plugin/",
         ),
         (
             "pi",
@@ -341,7 +396,7 @@ pub(crate) fn doctor(cfg: &Config) -> i32 {
                 cwd.join(".pi/extensions"),
                 home.join(".pi/agent/extensions"),
             ])),
-            "cp adapters/dist/pi/cacogate.js .pi/extensions/",
+            "cp adapters/dist/pi/cacogate.js ~/.pi/agent/extensions/",
         ),
         (
             "omp",
@@ -351,7 +406,7 @@ pub(crate) fn doctor(cfg: &Config) -> i32 {
                 home.join(".omp/agent/extensions"),
                 cwd.join(".pi/extensions"),
             ])),
-            "omp -e adapters/dist/pi/cacogate.js (or copy into .omp/extensions/)",
+            "cp adapters/dist/pi/cacogate.js ~/.omp/agent/extensions/",
         ),
         (
             "gnomon",

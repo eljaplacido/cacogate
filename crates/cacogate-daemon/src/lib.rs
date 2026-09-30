@@ -5,6 +5,7 @@
 
 pub mod config;
 pub mod engine;
+pub mod identity;
 pub mod server;
 
 pub use config::Config;

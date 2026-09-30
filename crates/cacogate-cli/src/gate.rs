@@ -3,13 +3,12 @@
 //! fail-class table (AGENTS.md article 5).
 
 use crate::http::Client;
-use cacogate_contracts::{ActionEnvelope, Check, CheckStatus, GateMode, Pillar, Verdict};
+use cacogate_contracts::{ActionEnvelope, Check, CheckStatus, GateMode, Pillar, Verdict, canon};
 use cacogate_daemon::Config;
 use cacogate_daemon::engine::now_rfc3339;
+use cacogate_daemon::identity;
 use cacogate_harness::CheckResponse;
-use cacogate_kernel::{
-    DecideInput, KernelEnv, SessionState, combine, decide as kdecide, extract, packet,
-};
+use cacogate_kernel::{DecideInput, SessionState, combine, decide as kdecide, extract, packet};
 use serde_json::json;
 use std::io::Write;
 use std::time::Duration;
@@ -27,25 +26,42 @@ pub(crate) struct Gated {
 /// compile; the caller must fail closed.
 pub(crate) fn decide(cfg: &Config, envelope: &ActionEnvelope) -> Option<Gated> {
     let client = Client::new(&cfg.addr, Duration::from_secs(3));
-    let err = match client.post::<_, CheckResponse>("/v1/check", envelope) {
-        Ok(r) => {
-            return Some(Gated {
-                verdict: r.decision.verdict,
-                mode: r.decision.mode.unwrap_or(cfg.mode),
-                packet: r.packet,
-                decision_id: Some(r.decision.decision_id),
-            });
+    let (fault, detail) = match client.post_identified::<_, CheckResponse>("/v1/check", envelope) {
+        Ok((r, header)) => {
+            let expected = identity::read(&cfg.data_dir);
+            let bound = canon::digest(envelope).is_ok_and(|d| d == r.decision.envelope_digest);
+            match identity::verify(
+                expected.as_ref(),
+                header.as_deref(),
+                Some(&r.decision.policy_digest),
+            ) {
+                // The reply must also be about the action we sent, so a
+                // captured "allow" cannot be replayed for another action.
+                Ok(()) if !bound => (
+                    "daemon_reply_unbound",
+                    "reply's envelope_digest is not the digest of the envelope sent".to_owned(),
+                ),
+                Ok(()) => {
+                    return Some(Gated {
+                        verdict: r.decision.verdict,
+                        mode: r.decision.mode.unwrap_or(cfg.mode),
+                        packet: r.packet,
+                        decision_id: Some(r.decision.decision_id),
+                    });
+                }
+                // Something answered, but not provably the daemon: its
+                // verdict is discarded, never merged.
+                Err(m) => ("daemon_identity_mismatch", m.to_string()),
+            }
         }
-        Err(e) => e,
+        Err(e) => ("daemon_unreachable", e.to_string()),
     };
     // Local fallback: same kernel, builtin policy, no session history.
-    spool(cfg, "daemon_unreachable", &err.to_string());
+    spool(cfg, fault, &detail);
     let compiled = cfg.policy().compile().ok()?;
     let facts = extract(
         envelope,
-        &KernelEnv {
-            home: cfg.home.clone(),
-        },
+        &cacogate_daemon::engine::kernel_env(&cfg.home, envelope),
     );
     let mut d = kdecide(&DecideInput {
         envelope,
@@ -67,7 +83,12 @@ pub(crate) fn decide(cfg: &Config, envelope: &ActionEnvelope) -> Option<Gated> {
             allows: facts.class.fail_verdict(),
             rule_class: None,
             detail: Some(format!(
-                "cacogate daemon unreachable; fail-safe default for {} actions, no session history",
+                "{}; fail-safe default for {} actions, no session history",
+                if fault == "daemon_unreachable" {
+                    "cacogate daemon unreachable".to_owned()
+                } else {
+                    format!("reply not from the cacogate daemon ({detail})")
+                },
                 facts.class.as_str()
             )),
             evidence_refs: vec![],

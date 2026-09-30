@@ -6,7 +6,7 @@
 //   pi.on("tool_result", (event{toolCallId,isError,…}, ctx) => undefined)
 // `ask_human` uses ctx.ui.confirm when a UI exists, and blocks otherwise.
 import { checkAction, reportExecution } from "./core/client.js";
-import { buildEnvelope } from "./core/envelope.js";
+import { buildEnvelope, packageVersionNear } from "./core/envelope.js";
 
 interface ToolCallEvent {
   toolCallId: string;
@@ -23,6 +23,7 @@ interface ToolResultEvent {
 
 interface Ctx {
   cwd?: string;
+  model?: { id?: string; provider?: string } | undefined;
   hasUI?: boolean;
   ui?: { confirm?: (title: string, message: string) => Promise<boolean> };
   sessionManager?: { getSessionId?: () => string; getSessionFile?: () => string | undefined };
@@ -53,10 +54,20 @@ export function harnessName(
   return argv.some((a) => /(^|[/\\])(omp|oh-my-pi)([/\\.]|$)/.test(a)) ? "omp" : "pi";
 }
 
+// Both pi and omp ship as `…/pi-coding-agent` packages; argv[1] is the CLI entry.
+const harnessVersion = packageVersionNear(process.argv[1], "pi-coding-agent");
+
 export default function cacogate(pi: ExtensionAPI): void {
   pi.on("tool_call", async (event, ctx) => {
     const env = buildEnvelope({
       harness: harnessName(),
+      ...(harnessVersion ? { harnessVersion } : {}),
+      model: ctx.model
+        ? {
+            ...(ctx.model.id ? { id: ctx.model.id } : {}),
+            ...(ctx.model.provider ? { endpoint_kind: ctx.model.provider } : {}),
+          }
+        : undefined,
       interactive: ctx.hasUI === true,
       sessionId: sessionOf(ctx),
       toolUseId: event.toolCallId,

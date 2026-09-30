@@ -1,5 +1,6 @@
 //! `cacogate` — causal–conformal action gate CLI.
 
+mod corpus;
 mod gate;
 mod hook;
 mod http;
@@ -11,7 +12,7 @@ use cacogate_contracts::{
 };
 use cacogate_daemon::{Config, Engine};
 use cacogate_harness::{claude, repo};
-use cacogate_kernel::{DecideInput, KernelEnv, SessionState, decide, extract, packet};
+use cacogate_kernel::{DecideInput, SessionState, decide, extract, packet};
 use cacogate_ledger::Ledger;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::{Map, Value, json};
@@ -75,6 +76,21 @@ enum Cmd {
         /// Print the full decision JSON.
         #[arg(long)]
         json: bool,
+    },
+    /// Replay recorded agent tool calls (JSON lines) through the kernel and
+    /// report per-rule firing and the would-refuse rate on real traffic.
+    Corpus {
+        /// JSON-lines file (`scripts/harvest_agent_commands.py` writes one).
+        path: String,
+        /// Print the report as JSON.
+        #[arg(long)]
+        json: bool,
+        /// Examples to show per rule.
+        #[arg(long, default_value_t = 3)]
+        examples: usize,
+        /// Write every row on which a rule fired to this file, for labelling.
+        #[arg(long)]
+        fired_out: Option<String>,
     },
     /// Stream decisions as they happen.
     Watch {
@@ -184,6 +200,12 @@ fn main() -> ExitCode {
             cwd,
             json,
         } => check(&cfg, &tool, command, file, cwd, json),
+        Cmd::Corpus {
+            path,
+            json,
+            examples,
+            fired_out,
+        } => corpus::run(&cfg, &path, json, examples, fired_out.as_deref()),
         Cmd::Watch { once, limit } => ui::watch(&cfg, once, limit),
         Cmd::Explain { id } => ui::explain(&cfg, &id),
         Cmd::Status => ui::status(&cfg),
@@ -235,9 +257,17 @@ fn daemon(mut cfg: Config, addr: Option<String>, mode: Option<ModeArg>) -> i32 {
         engine.policy().policy.name,
         cfg.data_dir.display()
     );
+    let nonce = match cacogate_daemon::identity::fresh_nonce() {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("cacogate: cannot draw an identity nonce: {e}");
+            return 1;
+        }
+    };
     let state = Arc::new(cacogate_daemon::server::AppState {
         engine,
         started: Instant::now(),
+        nonce,
     });
     let rt = match tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -250,7 +280,11 @@ fn daemon(mut cfg: Config, addr: Option<String>, mode: Option<ModeArg>) -> i32 {
             return 1;
         }
     };
-    match rt.block_on(cacogate_daemon::server::serve(&cfg.addr, state)) {
+    match rt.block_on(cacogate_daemon::server::serve(
+        &cfg.addr,
+        state,
+        &cfg.data_dir,
+    )) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("cacogate: serve {}: {e}", cfg.addr);
@@ -314,9 +348,7 @@ fn check(
     let started = Instant::now();
     let facts = extract(
         &envelope,
-        &KernelEnv {
-            home: cfg.home.clone(),
-        },
+        &cacogate_daemon::engine::kernel_env(&cfg.home, &envelope),
     );
     let mut d = decide(&DecideInput {
         envelope: &envelope,

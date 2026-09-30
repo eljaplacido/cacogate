@@ -66,4 +66,43 @@ impl Client {
             .map_err(|e| self.map(e))?;
         r.into_json().map_err(|e| HttpError::Decode(e.to_string()))
     }
+
+    /// GET a JSON document and the daemon identity header.
+    pub(crate) fn get_identified<T: DeserializeOwned>(
+        &self,
+        path: &str,
+    ) -> Result<(T, Option<String>), HttpError> {
+        let r = self
+            .agent
+            .get(&format!("{}{path}", self.base))
+            .call()
+            .map_err(|e| self.map(e))?;
+        let id = r
+            .header(cacogate_daemon::identity::IDENTITY_HEADER)
+            .map(str::to_owned);
+        let v = r
+            .into_json()
+            .map_err(|e| HttpError::Decode(e.to_string()))?;
+        Ok((v, id))
+    }
+
+    /// POST JSON, decode JSON, and return the daemon identity header too.
+    pub(crate) fn post_identified<B: Serialize, T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<(T, Option<String>), HttpError> {
+        let r = self
+            .agent
+            .post(&format!("{}{path}", self.base))
+            .send_json(body)
+            .map_err(|e| self.map(e))?;
+        let id = r
+            .header(cacogate_daemon::identity::IDENTITY_HEADER)
+            .map(str::to_owned);
+        let v = r
+            .into_json()
+            .map_err(|e| HttpError::Decode(e.to_string()))?;
+        Ok((v, id))
+    }
 }
