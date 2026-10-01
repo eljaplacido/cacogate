@@ -3,7 +3,7 @@
 Causal–conformal action gate between AI coding agents and the actions they take.
 Deny-first: it can only tighten what the harness would do on its own.
 
-Status: **P0/P1 in progress.** The symbolic gate works end to end. The
+Status: **P0/P1 in progress** (see `CURRENT_STAGE.md`). The symbolic gate works end to end. The
 conformal and causal pillars are not built yet, so every decision reports its
 conformal status as `absent`. See `honesty/declared_not_implemented.json` for
 what is not built.

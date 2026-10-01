@@ -92,11 +92,6 @@
       "doc": "docs/01-BLUEPRINT.md#1.2"
     },
     {
-      "id": "worktree-roots",
-      "claim": "Treat sibling git worktrees of the same repository as inside the root (largest remaining DEF-FS-002 / INV-FS-001 source on real traffic; needs a contract change and an owner decision)",
-      "doc": "honesty/readings.jsonl#R-014"
-    },
-    {
       "id": "unmeasured-holds",
       "claim": "132 of 17,398 real calls still held as could-not-measure (reassigned or computed variables, globs)",
       "doc": "honesty/readings.jsonl#R-013"
